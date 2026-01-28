@@ -1,44 +1,61 @@
-import * as THREE from 'three';
+// src/canvas/interactions.ts
+import * as THREE from "three";
 
-export interface CameraRig {
-  camera: THREE.PerspectiveCamera;
-  target: THREE.Vector3;
-  updateLookAt: () => void;
-  frameShed: (object: THREE.Object3D) => void;
-  resize: (width: number, height: number) => void;
-}
-
-export const createCameraRig = (width: number, height: number): CameraRig => {
-  const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
-  const target = new THREE.Vector3(0, 1, 0);
-
-  camera.position.set(5, 3.5, 6);
-  camera.lookAt(target);
-
-  const updateLookAt = () => {
-    camera.lookAt(target);
-  };
-
-  const frameShed = (object: THREE.Object3D) => {
-    const box = new THREE.Box3().setFromObject(object);
-    const size = new THREE.Vector3();
-    const center = new THREE.Vector3();
-    box.getSize(size);
-    box.getCenter(center);
-
-    const maxSize = Math.max(size.x, size.y, size.z, 1);
-    const fov = THREE.MathUtils.degToRad(camera.fov);
-    const distance = (maxSize / (2 * Math.tan(fov / 2))) * 1.4;
-
-    target.copy(center);
-    camera.position.set(center.x + distance, center.y + distance * 0.6, center.z + distance);
-    updateLookAt();
-  };
-
-  const resize = (newWidth: number, newHeight: number) => {
-    camera.aspect = newWidth / newHeight;
-    camera.updateProjectionMatrix();
-  };
-
-  return { camera, target, updateLookAt, frameShed, resize };
+type RegisterArgs = {
+  element: HTMLElement | null | undefined; // <-- the element we attach listeners to
+  shedGroup: THREE.Object3D;
+  camera: THREE.Camera;
+  onSelect?: (hit: THREE.Object3D | null) => void;
 };
+
+export function registerInteractions({ element, shedGroup, camera, onSelect }: RegisterArgs) {
+  if (!element) {
+    // Don’t crash the app; just no interactions until element exists
+    console.warn("[registerInteractions] No element provided; skipping interactions setup.");
+    return () => {};
+  }
+
+  let dragging = false;
+  let lastX = 0;
+
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+
+  function onMouseDown(e: MouseEvent) {
+    dragging = true;
+    lastX = e.clientX;
+  }
+
+  function onMouseUp() {
+    dragging = false;
+  }
+
+  function onMouseMove(e: MouseEvent) {
+    if (!dragging) return;
+    const dx = e.clientX - lastX;
+    shedGroup.rotation.y += dx * 0.005;
+    lastX = e.clientX;
+  }
+
+  function onClick(e: MouseEvent) {
+    const rect = element.getBoundingClientRect();
+    pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObject(shedGroup, true);
+    onSelect?.(hits.length ? hits[0].object : null);
+  }
+
+  element.addEventListener("mousedown", onMouseDown);
+  window.addEventListener("mouseup", onMouseUp);
+  window.addEventListener("mousemove", onMouseMove);
+  element.addEventListener("click", onClick);
+
+  return () => {
+    element.removeEventListener("mousedown", onMouseDown);
+    window.removeEventListener("mouseup", onMouseUp);
+    window.removeEventListener("mousemove", onMouseMove);
+    element.removeEventListener("click", onClick);
+  };
+}

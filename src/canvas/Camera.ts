@@ -1,46 +1,44 @@
-import * as THREE from 'three';
-import type { OpeningState, PanelState, ShedDimensions } from '../store/shedStore';
-import { PANEL_THICKNESS_VALUE } from './Panel';
+// src/canvas/Camera.ts
+import * as THREE from "three";
 
-export const createOpeningMesh = (
-  opening: OpeningState,
-  panel: PanelState,
-  dimensions: ShedDimensions
-): THREE.Mesh => {
-  const material = new THREE.MeshStandardMaterial({
-    color: opening.type === 'door' ? 0x94a3b8 : 0x60a5fa,
-    metalness: 0.1,
-    roughness: 0.4,
-  });
-  const size = opening.type === 'door' ? { w: 0.8, h: 1.6 } : { w: 0.8, h: 0.6 };
-  const depth = PANEL_THICKNESS_VALUE * 1.5;
-  const geometry = new THREE.BoxGeometry(size.w, size.h, depth);
-  const mesh = new THREE.Mesh(geometry, material);
+type CameraRig = {
+  camera: THREE.PerspectiveCamera;
+  target: THREE.Vector3;
+  frameShed: (object: THREE.Object3D, padding?: number) => void;
+};
 
-  const y = opening.type === 'door' ? size.h / 2 : dimensions.height * 0.6;
+export function createCameraRig(): CameraRig {
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
+  const target = new THREE.Vector3(0, 1.5, 0);
 
-  switch (panel.type) {
-    case 'front':
-      mesh.position.set(0, y, dimensions.depth / 2 + depth / 2);
-      break;
-    case 'back':
-      mesh.position.set(0, y, -dimensions.depth / 2 - depth / 2);
-      break;
-    case 'left':
-      mesh.position.set(-dimensions.width / 2 - depth / 2, y, 0);
-      break;
-    case 'right':
-      mesh.position.set(dimensions.width / 2 + depth / 2, y, 0);
-      break;
-    default:
-      mesh.position.set(0, y, 0);
+  camera.position.set(8, 6, 8);
+  camera.lookAt(target);
+
+  // Frames the shed by moving the camera back far enough to fit the object's bounds.
+  function frameShed(object: THREE.Object3D, padding = 1.2) {
+    const box = new THREE.Box3().setFromObject(object);
+    const size = box.getSize(new THREE.Vector3());
+    const centre = box.getCenter(new THREE.Vector3());
+
+    // Update target to shed centre (slightly above centre feels nicer)
+    target.copy(centre);
+    target.y += size.y * 0.15;
+
+    // Compute a distance that fits the largest dimension in view
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const fov = (camera.fov * Math.PI) / 180;
+    let distance = (maxDim / (2 * Math.tan(fov / 2))) * padding;
+
+    if (!Number.isFinite(distance) || distance <= 0) distance = 10;
+
+    // Keep current viewing direction, just adjust distance
+    const dir = new THREE.Vector3().subVectors(camera.position, target).normalize();
+    if (dir.lengthSq() === 0) dir.set(1, 0.6, 1).normalize();
+
+    camera.position.copy(target).add(dir.multiplyScalar(distance));
+    camera.lookAt(target);
+    camera.updateProjectionMatrix();
   }
 
-  mesh.userData = {
-    type: 'opening',
-    openingId: opening.id,
-    baseColor: mesh.material.color.getHex(),
-  };
-  mesh.name = `Opening-${opening.type}`;
-  return mesh;
-};
+  return { camera, target, frameShed };
+}
